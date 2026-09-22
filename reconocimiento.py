@@ -1,43 +1,110 @@
-from keras.models import load_model  # TensorFlow is required for Keras to work
-from PIL import Image, ImageOps  # Install pillow instead of PIL
+import cv2
 import numpy as np
+from keras.models import load_model
 
-# Disable scientific notation for clarity
-np.set_printoptions(suppress=True)
+# ==============================
+# CONFIGURACIÓN
+# ==============================
 
-# Load the model
-model = load_model("keras_Model.h5", compile=False)
+UMBRAL_CONFIANZA = 0.85  # 85%
 
-# Load the labels
+# ==============================
+# CARGAR MODELO
+# ==============================
+
+model = load_model("keras_model.h5", compile=False)
+
+# Cargar nombres de las clases
 class_names = open("labels.txt", "r").readlines()
 
-# Create the array of the right shape to feed into the keras model
-# The 'length' or number of images you can put into the array is
-# determined by the first position in the shape tuple, in this case 1
-data = np.ndarray(shape=(1, 224, 224, 3), dtype=np.float32)
+# ==============================
+# ABRIR CÁMARA
+# ==============================
 
-# Replace this with the path to your image
-image = Image.open("<IMAGE_PATH>").convert("RGB")
+camera = cv2.VideoCapture(0)
 
-# resizing the image to be at least 224x224 and then cropping from the center
-size = (224, 224)
-image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
+if not camera.isOpened():
+    print("No se pudo abrir la cámara.")
+    exit()
 
-# turn the image into a numpy array
-image_array = np.asarray(image)
+print("Cámara iniciada.")
+print("Presiona Q para salir.")
 
-# Normalize the image
-normalized_image_array = (image_array.astype(np.float32) / 127.5) - 1
+# ==============================
+# RECONOCIMIENTO
+# ==============================
 
-# Load the image into the array
-data[0] = normalized_image_array
+while True:
 
-# Predicts the model
-prediction = model.predict(data)
-index = np.argmax(prediction)
-class_name = class_names[index]
-confidence_score = prediction[0][index]
+    # Leer imagen de la cámara
+    ret, frame = camera.read()
 
-# Print prediction and confidence score
-print("Class:", class_name[2:], end="")
-print("Confidence Score:", confidence_score)
+    if not ret:
+        print("No se pudo obtener imagen de la cámara.")
+        break
+
+    # Preparar imagen para el modelo
+    image = cv2.resize(frame, (224, 224))
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    # Normalizar
+    image = (image.astype(np.float32) / 127.5) - 1
+
+    # Crear arreglo para el modelo
+    data = np.ndarray(
+        shape=(1, 224, 224, 3),
+        dtype=np.float32
+    )
+
+    data[0] = image
+
+    # ==============================
+    # PREDICCIÓN
+    # ==============================
+
+    prediction = model.predict(data, verbose=0)
+
+    index = np.argmax(prediction)
+    confidence = prediction[0][index]
+
+    # ==============================
+    # DECIDIR SI RECONOCER
+    # ==============================
+
+    if confidence >= UMBRAL_CONFIANZA:
+
+        class_name = class_names[index].strip()
+
+        texto = f"{class_name} - {confidence * 100:.1f}%"
+
+    else:
+
+        texto = f"No reconocido - {confidence * 100:.1f}%"
+
+    # ==============================
+    # MOSTRAR RESULTADO
+    # ==============================
+
+    cv2.putText(
+        frame,
+        texto,
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 255, 0),
+        2
+    )
+
+    # Mostrar cámara
+    cv2.imshow("Reconocimiento", frame)
+
+    # Presionar Q para salir
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+# ==============================
+# CERRAR
+# ==============================
+
+camera.release()
+cv2.destroyAllWindows()
